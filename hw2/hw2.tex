@@ -1,0 +1,38 @@
+\documentclass[11pt,letterpaper]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage{enumitem}
+\usepackage{hyperref}
+
+\title{Spacecraft ADCS Homework 2}
+\author{Due Thursday, March 12, 2026}
+\date{}
+
+\begin{document}
+
+\maketitle
+
+\section{Safe Mode}
+
+Most modern spacecraft have a ``safe mode'' built into their operating software that is triggered in the event of a system malfunction. Attitude is an important part of this, as solar panels must be illuminated and communication antennas must be pointed to Earth to keep the spacecraft alive. Often, a spacecraft is put into a passively stable spin. Design a stable spin configuration for your satellite that keeps the solar panels pointed in an inertially fixed direction (i.e. towards the sun). 
+\begin{enumerate}
+	\item Specify the desired angular velocity vector in body coordinates corresponding to a spin of 10 RPM about the solar panel normal vector. In general, this will not be a principle axis.
+	\item Using superspin and dynamic balance, calculate the rotor momentum necessary to stabilize this angular velocity vector with an inertia ratio of at least 1.2.
+	\item Add rotors to your Euler equation code to implement the gyrostat equation.
+	\item Simulate the stable spin configuration you calculated. Perturb the initial conditions slightly to demonstrate stability.
+\end{enumerate}
+
+
+\section{Spacecraft Dynamics}
+
+Add gyrostat dynamics to your orbit simulation from HW 1. The state vector should now include the attitude quaternion, angular velocity, and rotor momentum in addition to position and velocity. Simulate the full spacecraft dynamics using the same orbit as last time and the perturbed initial conditions from question 1.4. For now, assume the sun vector is parallel to the $x$-axis in ECI coordinates. Plot the components of the attitude quaternion as well as the pointing error of the solar panel normal vector in degrees over several nutation periods.
+
+\section{Attitude Sensors}
+
+Describe the attitude sensors onboard your chosen spacecraft. You should find the specifications either for the actual sensors used or similar/representative sensors from the literature. Convert whatever specifications you find into a set of covariance matrices that can be used in your attitude determination algorithms. Document how you derived at your covariance matrices from the published specifications. Finally, write code to generate simulated noisy measurements from each sensor. Demonstrate that the simulated measurements have the correct error statistics.
+
+\section{Static Attitude Estimation}
+
+Using the simulated sensor measurements you have generated, perform static attitude estimation by solving Wahba's problem. Perform Monte Carlo simulations (i.e. many trials with randomly generated measurements) and compare the performance of at least two different algorithms.
+
+\end{document}

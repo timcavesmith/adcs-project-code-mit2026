@@ -55,7 +55,7 @@ $F = \frac{GMm}{r^2}$
 
 so 2-body EOM is
 
-$\frac{GM}{r^3}\bar x = \bar a$
+$-\frac{GM}{r^3}\bar x = \bar a$
 
 so for,
 $$

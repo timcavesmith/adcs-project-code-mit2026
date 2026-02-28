@@ -8,7 +8,7 @@
 import numpy as np
 import plotly.graph_objects as go
 
-# ── Fake orbit data for demo (replace with your xhist) ────────────────
+# ── Fake orbit data for demo (replace with xhist) ────────────────
 n = 500
 mu = 3.986004418e5  # km³/s²
 R_earth = 6371.0     # km
@@ -145,4 +145,4 @@ fig.update_layout(
 
 # ── Show or save ──────────────────────────────────────────────────────
 fig.show()                         # opens in browser
-# fig.write_html("orbit_3d.html")  # standalone file, great for presentations
+# fig.write_html("orbit_3d.html")  # standalone file

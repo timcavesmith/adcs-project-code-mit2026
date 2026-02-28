@@ -13,7 +13,7 @@ os.environ["PYVISTA_OFF_SCREEN"] = "true"
 os.environ["MESA_GL_VERSION_OVERRIDE"] = "3.3"
 
 
-# ── Fake orbit data for demo (replace with your xhist) ────────────────
+# ── Fake orbit data for demo (replace with xhist) ────────────────
 n = 500
 R_earth = 6371.0  # km
 
@@ -33,9 +33,9 @@ orbit_pts = np.column_stack([x_orb, y_orb, z_orb])
 earth = pv.Sphere(radius=R_earth, theta_resolution=60, phi_resolution=60)
 earth = earth.texture_map_to_sphere()
 
-# If you have a texture image (e.g., from NASA Blue Marble):
+# If texture image (NASA Blue Marble):
 #   texture = pv.read_texture("earth_texture.jpg")
-# Otherwise we'll just color it blue-green
+# Otherwise color it blue-green
 has_texture = False
 texture_path = Path("earth_texture.jpg")
 if texture_path.exists():
@@ -78,7 +78,7 @@ def plot_static():
 def plot_animated(speed=5):
     """
     Animate the spacecraft along the orbit.
-    You can rotate/zoom WHILE the animation plays.
+    Can rotate/zoom WHILE the animation plays.
     
     Args:
         speed: plot every `speed`-th point (higher = faster)
@@ -104,7 +104,7 @@ def plot_animated(speed=5):
         render_points_as_spheres=True,
     )
 
-    # Trail (optional — shows where spacecraft has been)
+    # Trail (shows where spacecraft has been)
     trail_pts = pv.PolyData(orbit_pts[0:1])
     trail_actor = pl.add_points(
         trail_pts,
@@ -117,7 +117,7 @@ def plot_animated(speed=5):
     pl.add_axes()
     pl.show(interactive_update=True, auto_close=False)
 
-    # Animation loop — you can rotate the view during this
+    # Animation loop — can rotate the view during this
     for i in range(0, n, speed):
         # Update spacecraft position
         sc_point.points = orbit_pts[i:i+1]

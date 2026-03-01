@@ -63,7 +63,7 @@ and GM is universal gravitational constant times Earth's mass which is earth's g
 The states are,
 $$
 
-x = \begin{bmatrix} q \\ \omega \end{bmatrix} \in \mathbb{R}^{10}\\[10pt]
+x = \begin{bmatrix} q \\ \omega \end{bmatrix} \in \mathbb{R}^{7}\\[10pt]
 
 \dot x = \frac{dx}{dt} = \begin{bmatrix} \dot q \\ \dot \omega \end{bmatrix}.
 

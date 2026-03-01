@@ -4,7 +4,8 @@
 # Part 2: omega vs time for each principal axis case (stability verification)
 #          + energy/momentum conservation checks
 # Part 3: momentum sphere with 6 equilibria + all trajectories
-# Bonus:  PyVista 3D tumble animation (desktop window)
+# 
+# For fun: PyVista 3D tumble animation 
 #
 # Usage:  python attitude_viz.py
 # Install: pip install pyvista matplotlib numpy
@@ -14,7 +15,7 @@ import matplotlib.pyplot as plt
 
 from attitude_dynamics import (
     results, cases, extra_cases,
-    h_mag, J, J_diag, quat_to_rotmat,
+    h_mag, J, quat_to_rotmat,
     h_step, n_steps,
 )
 
@@ -124,7 +125,7 @@ plt.show()
 
 
 # ══════════════════════════════════════════════════════════════════════
-# BONUS: Additional view — momentum sphere from different angles
+# momentum sphere from different angles
 # ══════════════════════════════════════════════════════════════════════
 
 fig2, axes2 = plt.subplots(1, 3, figsize=(18, 6),
@@ -165,7 +166,7 @@ plt.show()
 
 
 # ══════════════════════════════════════════════════════════════════════
-# 3D PYVISTA TUMBLE ANIMATION (intermediate axis )
+# 3D PYVISTA TUMBLE ANIMATION (intermediate axis)
 # ══════════════════════════════════════════════════════════════════════
 
 try:
@@ -185,11 +186,55 @@ try:
     pl = pv.Plotter(window_size=[1200, 800])
     pl.set_background('black')
 
-    # box sized to reflect inertia
-    box_mesh = pv.Box(bounds=(-0.7, 0.7, -0.5, 0.5, -0.3, 0.3))
-    box_actor = pl.add_mesh(box_mesh, color='steelblue', show_edges=True,
-                            edge_color='white', opacity=0.9)
+    # SIMPLE BOX: box sized to reflect inertia
+    # box_mesh = pv.Box(bounds=(-0.7, 0.7, -0.5, 0.5, -0.3, 0.3))
+    # box_actor = pl.add_mesh(box_mesh, color='steelblue', show_edges=True,
+    #                         edge_color='white', opacity=0.9)
 
+
+    # DREAMCHASER MODEL:
+
+    # fuselage: long narrow body
+    fuselage = pv.Box(bounds=(-3.7, 3.7, -0.7, 0.7, -0.5, 0.5))
+
+    # wings: wide, thin, slightly below fuselage
+    wings = pv.Box(bounds=(-3.7, 3.7, -1.9, 1.9, 0.0, 0.1))
+
+    # nose: forward block
+    nose = pv.Box(bounds=(3.7, 5.1, -0.7, 0.7, -0.5, 0.5))
+
+    # wingtips: thin triangular-ish plates, swept back and below
+    tip_r = pv.Box(bounds=(-4.2, -1.2, 1.9, 3.1, -0.15, -0.05))
+    tip_l = pv.Box(bounds=(-4.2, -1.2, -3.1, -1.9, -0.15, -0.05))
+
+    spacecraft = fuselage.merge(wings).merge(nose).merge(tip_r).merge(tip_l)
+    spacecraft.points /= 5.0
+
+
+    # # ── Dream Chaser simplified mesh ──────────────────────────────
+    # # fuselage: 7.4 x 1.4 x 1.0 m centered at origin
+    # fuselage = pv.Box(bounds=(-3.7, 3.7, -0.7, 0.7, -0.5, 0.5))
+
+    # # wings: 7.4 x 3.8 x 0.15 m, offset down in z
+    # wings = pv.Box(bounds=(-3.7, 3.7, -1.9, 1.9, 0.3, 0.45))
+
+    # # nose: 1.4 x 1.4 x 1.0 m, forward
+    # nose = pv.Box(bounds=(3.7, 5.1, -0.7, 0.7, -0.5, 0.5))
+
+    # # starboard wingtip (triangle approximated as wedge)
+    # tip_r = pv.Box(bounds=(-4.2, -1.2, 1.9, 3.1, -0.3, -0.1))
+    # # port wingtip
+    # tip_l = pv.Box(bounds=(-4.2, -1.2, -3.1, -1.9, -0.3, -0.1))
+
+    # # combine into single mesh
+    # spacecraft = fuselage.merge(wings).merge(nose).merge(tip_r).merge(tip_l)
+
+    # # scale down for visualization (meters are big)
+    # spacecraft.points /= 5.0  # scale to ~1.5m bounding box
+
+    box_actor = pl.add_mesh(spacecraft, color='steelblue', show_edges=True,
+                            edge_color='white', opacity=0.9)
+    
     # inertial axes
     pl.add_mesh(pv.Arrow(start=(0,0,0), direction=(1,0,0), scale=1.5), color='red')
     pl.add_mesh(pv.Arrow(start=(0,0,0), direction=(0,1,0), scale=1.5), color='green')

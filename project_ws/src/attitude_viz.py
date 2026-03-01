@@ -177,8 +177,10 @@ try:
     xhist_anim = results[case_name]['xhist']
     n = xhist_anim.shape[1]
 
-    frame_step = max(1, n // 500)
-    frame_indices = list(range(0, n, frame_step))
+    #frame_step = max(1, n // 500) #only show about 500 frames
+    #frame_indices = list(range(0, n, frame_step))
+    frame_indices = list(range(0, n))  # every frame, no skipping
+    #frame_indices = list(range(0, n, 2)) #skip every other frame
 
     pl = pv.Plotter(window_size=[1200, 800])
     pl.set_background('black')
@@ -195,26 +197,27 @@ try:
 
     pl.add_text(f"Tumble: {case_name}  |  close window to exit",
                 position='upper_left', font_size=10, color='white')
+    try:
+        pl.show(auto_close=False, interactive_update=True)
 
-    pl.show(auto_close=False, interactive_update=True)
-
-    for loop in range(5):
-        for idx in frame_indices:
-            q_k = xhist_anim[0:4, idx]
-            Q = quat_to_rotmat(q_k)
-            T4 = np.eye(4)
-            T4[:3, :3] = Q
-            box_actor.user_matrix = T4
-            pl.update()
-            time.sleep(h_step * frame_step * 0.3)
-            #time.sleep(0.02)  # 0.02 is about 50 fps, adjust up for slower playback
-            if not pl.render_window:
-                break
-        else:
-            continue
-        break
-
-    pl.close()
+        for loop in range(5):
+            for idx in frame_indices:
+                q_k = xhist_anim[0:4, idx]
+                Q = quat_to_rotmat(q_k)
+                T4 = np.eye(4)
+                T4[:3, :3] = Q
+                box_actor.user_matrix = T4
+                pl.update()
+                #time.sleep(h_step * frame_step * 0.3)
+                #time.sleep(0.02)  # 0.02 is about 50 fps, adjust up for slower playback
+                #time.sleep(h_step) # (sim time = wall clock time) about 20 fps with 0.05 sec h_step
+                time.sleep(h_step / 2) # double wall clock time
+            
+            
+    except (KeyboardInterrupt, Exception):
+        pass
+    finally:
+        pl.close()
 
 except ImportError:
     print("\n  PyVista not installed -- skipping 3D tumble animation.")

@@ -57,8 +57,17 @@ def quat_to_rotmat(q):
 # INERTIA & DYNAMICS
 # ══════════════════════════════════════════════════════════════════════
 
-J = np.diag([1.0, 2.0, 3.0])            # principal inertia [kg*m^2]
-J_diag = np.array([1.0, 2.0, 3.0])
+# example for testing
+# J = np.diag([1.0, 2.0, 3.0])            # principal inertia [kg*m^2]
+# J_diag = np.array([1.0, 2.0, 3.0])
+
+# spacraft inertia matrix
+J = np.array([[12685.21,      0,  -1358.05],
+              [     0,  51407.14,       0  ],
+              [-1358.05,      0,  57999.34]])
+
+# eigendecompose for principal axes and moments
+eigvals, eigvecs = np.linalg.eigh(J) # eigvals sorted like [minor, intermediate, major]
 
 
 def dynamics(x):
@@ -70,7 +79,8 @@ def dynamics(x):
 
     qdot     = 0.5 * G(q) @ omega
     tau      = np.zeros(3)
-    omegadot = (tau - hat(omega) @ J @ omega) / J_diag
+    # omegadot = (tau - hat(omega) @ J @ omega) / J_diag (little faster if we had diagonal J > might use for personal sim)
+    omegadot = np.linalg.solve(J, tau - hat(omega) @ J @ omega)
 
     return np.concatenate([qdot, omegadot])
 
@@ -127,34 +137,32 @@ def postprocess(xhist):
 # so angular momentum magnitude is the same for all three.
 # Small perturbation on off-axes to excite nutation.
 
+
+# sim params
+h_step  = 0.01
+n_steps = 6000    # 300 s total
+
 rpm = 10.0
 omega_major = rpm * 2 * np.pi / 60   # rad/s
 
 # angular momentum magnitude from major axis spin
-h_mag = J_diag[2] * omega_major      # ||h|| = J3 * omega3
+h_mag = eigvals[2] * omega_major      # ||h|| = J_major * omega
 
-# omega for each axis to give same ||h||
-omega_ax1 = h_mag / J_diag[0]        # minor axis   (J1 = 1)
-omega_ax2 = h_mag / J_diag[1]        # intermediate (J2 = 2)
-omega_ax3 = omega_major               # major axis   (J3 = 3)
-
+# omega for each principal axis to give same ||h||, expressed in body frame
 pert = 0.05  # perturbation [rad/s]
-
-# sim params
-h_step  = 0.05
-n_steps = 6000    # 300 s total
+pert_vec = pert * np.ones(3)
 
 cases = {
-    'Major axis (axis 3, J=3) - STABLE': {
-        'omega0': np.array([pert, pert, omega_ax3]),
+    f'Major axis (J={eigvals[2]:.0f}) - STABLE': {
+        'omega0': (h_mag / eigvals[2]) * eigvecs[:, 2] + pert_vec,
         'color': 'tab:blue',
     },
-    'Intermediate axis (axis 2, J=2) - UNSTABLE': {
-        'omega0': np.array([pert, omega_ax2, pert]),
+    f'Intermediate axis (J={eigvals[1]:.0f}) - UNSTABLE': {
+        'omega0': (h_mag / eigvals[1]) * eigvecs[:, 1] + pert_vec,
         'color': 'tab:red',
     },
-    'Minor axis (axis 1, J=1) - STABLE': {
-        'omega0': np.array([omega_ax1, pert, pert]),
+    f'Minor axis (J={eigvals[0]:.0f}) - STABLE': {
+        'omega0': (h_mag / eigvals[0]) * eigvecs[:, 0] + pert_vec,
         'color': 'tab:green',
     },
 }
@@ -163,11 +171,10 @@ cases = {
 np.random.seed(1)
 extra_cases = {}
 for i in range(4):
-    # random direction in h-space, same ||h||, then omega = J^{-1} h
     direction = np.random.randn(3)
     direction /= np.linalg.norm(direction)
     h_vec = h_mag * direction
-    omega_rand = h_vec / J_diag
+    omega_rand = np.linalg.solve(J, h_vec)
     omega_rand += 0.02 * np.random.randn(3)
     extra_cases[f'Random trajectory {i+1}'] = {
         'omega0': omega_rand,
@@ -198,7 +205,7 @@ for name, case in {**cases, **extra_cases}.items():
 if __name__ == "__main__":
     print(f"10 RPM = {omega_major:.4f} rad/s")
     print(f"||h|| = {h_mag:.4f} N*m*s")
-    print(f"omega for same ||h||:  axis1={omega_ax1:.4f}  axis2={omega_ax2:.4f}  axis3={omega_ax3:.4f}")
+    print(f"Principal moments: {eigvals}")
     print(f"Perturbation: {pert} rad/s")
     print(f"Sim: {n_steps} steps, h={h_step} s, tf={n_steps*h_step:.1f} s\n")
 

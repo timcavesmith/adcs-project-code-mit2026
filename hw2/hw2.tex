@@ -3,6 +3,8 @@
 \usepackage[margin=1in]{geometry}
 \usepackage{enumitem}
 \usepackage{hyperref}
+\usepackage{amsmath}
+\usepackage{amssymb}
 
 \title{Spacecraft ADCS Homework 2}
 \author{Due Thursday, March 12, 2026}
@@ -16,6 +18,22 @@
 
 Most modern spacecraft have a ``safe mode'' built into their operating software that is triggered in the event of a system malfunction. Attitude is an important part of this, as solar panels must be illuminated and communication antennas must be pointed to Earth to keep the spacecraft alive. Often, a spacecraft is put into a passively stable spin. Design a stable spin configuration for your satellite that keeps the solar panels pointed in an inertially fixed direction (i.e. towards the sun). 
 \begin{enumerate}
+	\item Write code to randomly perturb the inertia matrix of your spacecraft that you calculated in HW1. This will ensure that the solar panel normal vector is not parallel to a principle axis. A good way to do this is to calculate the eigendecomposition of your spacecraft's inertia:
+	\begin{equation*}
+		J = VDV^T ,
+	\end{equation*}
+	then add a random perturbation of e.g. a few percent to the eigenvalues in $D$:
+	\begin{equation*}
+		\tilde{D} = D(I + \mathrm{diag}(d)) ,
+	\end{equation*}
+	and also perturb the principal axis directions by sampling a random rotation of a few degrees:
+	\begin{equation*}
+		\tilde{V} = V \exp (\hat{v}) ,
+	\end{equation*}
+	where $d \in \mathbb{R}^3$ and $v \in \mathbb{R}^3$ are both sampled from Gaussian distributions with appropriate covariances. You can then multiply these back together to produce the perturbed inertia:
+	\begin{equation*}
+		\tilde{J} = \tilde{V}\tilde{D}\tilde{V}^T
+	\end{equation*}
 	\item Specify the desired angular velocity vector in body coordinates corresponding to a spin of 10 RPM about the solar panel normal vector. In general, this will not be a principle axis.
 	\item Using superspin and dynamic balance, calculate the rotor momentum necessary to stabilize this angular velocity vector with an inertia ratio of at least 1.2.
 	\item Add rotors to your Euler equation code to implement the gyrostat equation.
@@ -33,6 +51,6 @@ Describe the attitude sensors onboard your chosen spacecraft. You should find th
 
 \section{Static Attitude Estimation}
 
-Using the simulated sensor measurements you have generated, perform static attitude estimation by solving Wahba's problem. Perform Monte Carlo simulations (i.e. many trials with randomly generated measurements) and compare the performance of at least two different algorithms.
+Using the simulated sensor measurements you have generated, perform static attitude estimation by solving Wahba's problem. Perform Monte Carlo simulations (i.e. many trials with randomly generated measurements) and compare the performance of at least two different algorithms. Possible metrics for comparison include accuracy and computational cost.
 
 \end{document}

@@ -101,11 +101,8 @@ def run_mekf(rate=10, tf=60.0, q0_true=None, omega0=None,
         bear_meas[3:6, k] = M_b_inv @ (bear_meas[3:6, k] - b_bearing)
         gyro_meas[:, k] = M_g_inv @ gyro_meas[:, k]
 
-    # process noise (tuned up from raw specs to avoid smug filter) 
-    # reference: USAFA advanced astronautics class notes
-    V_att = covW_gyro * np.sqrt(rate) + 1e-6 * np.eye(3)
-    V_bias = covBias_gyro / np.sqrt(rate) + 1e-6 * np.eye(3)
-    V = block_diag(V_att, V_bias)
+    # process noise as tuning parameter (reference: USAFA advanced astronautics class notes. tune this to prevent "smug filter")
+    V = 1e-6 * np.eye(6)
 
     W_bear = block_diag(covW_bearing, covW_bearing)
     W_st_mat = covW_st

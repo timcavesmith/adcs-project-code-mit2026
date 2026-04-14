@@ -1,4 +1,4 @@
-# mekf.py - MEKF for attitude + gyro bias (Lectures 11-12)
+# mekf.py - MEKF
 
 import numpy as np
 from utils import hat, H, T, L, R, G, Q, expq, logq

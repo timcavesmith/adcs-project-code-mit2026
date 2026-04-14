@@ -101,7 +101,8 @@ def run_mekf(rate=10, tf=60.0, q0_true=None, omega0=None,
         bear_meas[3:6, k] = M_b_inv @ (bear_meas[3:6, k] - b_bearing)
         gyro_meas[:, k] = M_g_inv @ gyro_meas[:, k]
 
-    # process noise (tuned up from raw specs to avoid smug filter)
+    # process noise (tuned up from raw specs to avoid smug filter) 
+    # reference: USAFA advanced astronautics class notes
     V_att = covW_gyro * np.sqrt(rate) + 1e-6 * np.eye(3)
     V_bias = covBias_gyro / np.sqrt(rate) + 1e-6 * np.eye(3)
     V = block_diag(V_att, V_bias)
@@ -211,7 +212,8 @@ if __name__ == "__main__":
     plt.tight_layout()
     plt.savefig(os.path.join(out_dir, 'hw3_mekf_demo.png'), dpi=150, bbox_inches='tight')
 
-    # sample rate comparison — plot low rates last so they're on top
+    # sample rate comparison:
+    # plot low rates last so they're on top
     rates = [50, 10, 1]
     fig2, ax2 = plt.subplots(figsize=(10, 4))
     for rate in rates:
@@ -226,7 +228,8 @@ if __name__ == "__main__":
     plt.tight_layout()
     plt.savefig(os.path.join(out_dir, 'hw3_rate_comparison.png'), dpi=150, bbox_inches='tight')
 
-    # consistency: skip initial transient so y-axis shows steady-state behavior
+    # consistency: 
+    # skip initial transient so y-axis shows steady-state behavior
     res3 = run_mekf(rate=10, tf=60, seed=7, use_st=True)
     t3 = res3['t']
     i_start = int(5.0 * 10)
@@ -255,7 +258,8 @@ if __name__ == "__main__":
     plt.tight_layout()
     plt.savefig(os.path.join(out_dir, 'hw3_consistency.png'), dpi=150, bbox_inches='tight')
 
-    # convergence — plot largest error first so smaller ones draw on top
+    # convergence:
+    # plot largest error first so smaller ones draw on top
     q0_true = expq(0.3 * np.array([1, 0.5, -0.7]))
     omega0 = np.radians(np.array([2, -1.5, 1.0]))
     init_errs_deg = [170, 90, 30, 5]

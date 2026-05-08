@@ -6,8 +6,8 @@ import sys
 import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
-from orbital_sim import mu, coe2rv
-from attitude_dynamics import G, quat_to_rotmat
+from hw1.orbital_sim import mu, coe2rv
+from hw1.attitude_dynamics import G, quat_to_rotmat
 from safe_mode import J, h_r, omega_des, pert_omega, n_sun_body, pointing_error_deg
 
 

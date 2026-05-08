@@ -1,11 +1,12 @@
-# HW2 Part 1: safe mode — perturbed inertia, 10 RPM spin, superspin rotor, gyrostat sim
+# HW2 Part 1: safe mode
+# perturbed inertia, 10 RPM spin, superspin + dynamic balance, gyrostat sim
 
 import numpy as np
 import matplotlib.pyplot as plt
 import sys
 import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
-from attitude_dynamics import J as J_nominal, hat, G, quat_to_rotmat
+from hw1.attitude_dynamics import J as J_nominal, hat, G, quat_to_rotmat
 
 
 def exp_hat(v):
@@ -32,27 +33,39 @@ def perturb_inertia(J, d_std=0.03, v_std=np.radians(2), rng=None):
     return V_tilde @ D_tilde @ V_tilde.T, eigvals, V, V_tilde, D_tilde
 
 
-# solar panel normal in body frame (not principal so spin axis is off-principal)
+def transverse_inertias(J, n_hat):
+    """Two principal inertias in the plane perpendicular to n_hat."""
+    # build orthonormal basis for the perp plane
+    v = np.array([1.0, 0, 0]) if abs(n_hat[0]) < 0.9 else np.array([0, 1.0, 0])
+    e1 = v - (v @ n_hat) * n_hat
+    e1 = e1 / np.linalg.norm(e1)
+    e2 = np.cross(n_hat, e1)
+    J_2x2 = np.array([[e1 @ J @ e1, e1 @ J @ e2],
+                      [e2 @ J @ e1, e2 @ J @ e2]])
+    return np.linalg.eigvalsh(J_2x2)
+
+
+def rotor_momentum(J, omega, ratio=1.2):
+    """
+    Choose h_r so that:
+      (a) equilibrium: J*omega + h_r is parallel to omega (dynamic balance cancels (J*omega)_perp)
+      (b) superspin:   effective spin inertia lambda >= ratio * max transverse principal inertia
+    Closed form: h_r = lambda*omega - J*omega.
+    """
+    n_hat = omega / np.linalg.norm(omega)
+    J_t = transverse_inertias(J, n_hat)
+    lam = ratio * np.max(J_t)
+    h_r = lam * omega - J @ omega
+    return h_r, lam, J_t
+
+
+# solar panel normal in body frame (off principal so spin axis is off-principal)
 n_sun_body = np.array([1.0, 0.15, 0.08])
 n_sun_body /= np.linalg.norm(n_sun_body)
 
 rpm = 10.0
 omega_mag = rpm * 2 * np.pi / 60  # rad/s
 omega_des = omega_mag * n_sun_body
-
-
-def rotor_momentum_for_superspin(J, omega, inertia_ratio_min=1.2):
-    """
-    h_total = J*omega + h_r parallel to omega => h_r = lambda*omega - J*omega.
-    Choose lambda so effective spin inertia lambda >= inertia_ratio_min * J_min.
-    """
-    J_omega = J @ omega
-    # effective spin inertia = (h_total . omega) / |omega|^2 = lambda
-    # require lambda >= inertia_ratio_min * min principal of J
-    J_min = np.min(np.linalg.eigvalsh(J))
-    lam = inertia_ratio_min * J_min
-    h_r = lam * omega - J_omega
-    return h_r, lam
 
 
 def dynamics_gyrostat(x, J, h_r):
@@ -91,9 +104,8 @@ def propagate_gyrostat(omega0, J, h_r, q0=None, h_step=0.01, n_steps=6000):
 
 rng = np.random.default_rng(42)
 J, _, _, _, _ = perturb_inertia(J_nominal, d_std=0.02, v_std=np.radians(1.5), rng=rng)
-h_r, lam = rotor_momentum_for_superspin(J, omega_des, inertia_ratio_min=1.2)
-J_min = np.min(np.linalg.eigvalsh(J))
-ratio_eff = lam / J_min
+h_r, lam, J_t = rotor_momentum(J, omega_des, ratio=1.2)
+ratio_eff = lam / np.max(J_t)
 pert_omega = 0.02 * np.array([0.5, -0.3, 0.4])
 
 n_sun_eci = np.array([1.0, 0, 0])
@@ -177,7 +189,9 @@ if __name__ == "__main__":
     print('n_sun_body:', n_sun_body)
     print('omega_des [rad/s]:', omega_des)
     print('|omega_des|:', np.linalg.norm(omega_des))
+    print('Transverse principal inertias:', J_t)
+    print('lambda (effective spin inertia):', lam)
     print('h_r:', h_r)
-    print('effective inertia ratio (lambda/J_min):', ratio_eff)
+    print('inertia ratio lambda/J_t_max:', ratio_eff)
     print('Pointing error nominal (deg) final:', err_nom[-1])
     print('Pointing error perturbed (deg) final:', err_pert[-1])

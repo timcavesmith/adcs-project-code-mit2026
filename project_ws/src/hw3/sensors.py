@@ -1,91 +1,68 @@
 import numpy as np
-from utils import *
+from utils import hat, L, Q, expq
+
+
+def sample_M(sigma_align_rad=0.0, sigma_scale=0.0, rng=None):
+    """Sample an affine-error matrix M = (I + diag(s)) exp(hat(alpha)).
+    alpha is small misalignment (rad) and s is per-axis scale error.
+    Pass sigma=0 to disable a term."""
+    if rng is None:
+        rng = np.random.default_rng()
+    alpha = rng.normal(0, sigma_align_rad, 3)
+    s = rng.normal(0, sigma_scale, 3)
+    th = np.linalg.norm(alpha)
+    if th < 1e-12:
+        M_align = np.eye(3)
+    else:
+        u = alpha / th
+        K = hat(u)
+        M_align = np.eye(3) + np.sin(th) * K + (1 - np.cos(th)) * (K @ K)
+    return (np.eye(3) + np.diag(s)) @ M_align
+
 
 class bearing_sensor:
-    def __init__(self, body_vector, bias_vector, M, covW):
-        self.set_body_vector(body_vector)
-        self.set_bias(bias_vector)
-        self.set_M(M)
-        self.set_covW(covW)
-
-    def set_body_vector(self, body_vector):
-        body_vector = np.asarray(body_vector)
-        if body_vector.shape not in ((3,), (3, 1)):
-            raise ValueError("body_vector must be shape (3,) or (3, 1)")
-        self.body_vector = body_vector.reshape(3,)
-
-    def set_bias(self, bias_vector):
-        bias_array = np.asarray(bias_vector)
-        if bias_array.shape not in ((3,), (3, 1)):
-            raise ValueError("bias_vector must be shape (3,) or (3, 1)")
-        self.bias_vector = bias_array.reshape(3,)
-
-    def set_M(self, M):
-        M = np.asarray(M)
-        if M.shape != (3, 3):
-            raise ValueError("M must be shape (3, 3)")
-        self.M = M
-
-    def set_covW(self, covW):
-        covW = np.asarray(covW)
-        if covW.shape != (3, 3):
-            raise ValueError("covW must be shape (3, 3)")
-        self.covW = covW
+    """y = M Q(q_true)^T r_inertial + b + w, w ~ N(0, W).
+    Q(q) is body-to-inertial, so Q(q)^T r drops an inertial reference vector into
+    the body frame. M and b model fixed scale/misalignment and bias errors."""
+    def __init__(self, r_inertial, W, M=None, b=None, rng=None):
+        self.r_inertial = np.asarray(r_inertial, dtype=float).reshape(3)
+        self.W = np.asarray(W, dtype=float)
+        self.M = np.eye(3) if M is None else np.asarray(M, dtype=float)
+        self.b = np.zeros(3) if b is None else np.asarray(b, dtype=float).reshape(3)
+        self.rng = rng if rng is not None else np.random.default_rng()
 
     def getMsmt(self, q_true):
-        q_true = q_true.reshape(4,)
-        y_true = Q(q_true).T @ self.body_vector
-        w = np.random.multivariate_normal(np.zeros(3), self.covW)
-        y = self.M @ y_true + self.bias_vector + w.T
-        return y.reshape(3,)
+        y_ideal = Q(q_true).T @ self.r_inertial
+        w = self.rng.multivariate_normal(np.zeros(3), self.W)
+        return self.M @ y_ideal + self.b + w
 
 
 class star_tracker:
-    def __init__(self, covW):
-        self.set_covW(covW)
-
-    def set_covW(self, covW):
-        covW = np.asarray(covW)
-        if covW.shape != (3, 3):
-            raise ValueError("covW must be shape (3, 3)")
-        self.covW = covW
+    """Lecture 12 form: q_meas = L(q_true) expq(w), w ~ N(0, W).
+    expq takes a half-angle vector, so W is the half-angle covariance
+    (data sheet full-angle variance / 4)."""
+    def __init__(self, W, rng=None):
+        self.W = np.asarray(W, dtype=float)
+        self.rng = rng if rng is not None else np.random.default_rng()
 
     def getMsmt(self, q_true):
-        q_true = q_true.reshape(4,)
-        w = np.random.multivariate_normal(np.zeros(3), self.covW)
-        q = q_true @ R(expq(w))
-        return q.reshape(4,)
+        w = self.rng.multivariate_normal(np.zeros(3), self.W)
+        return L(q_true) @ expq(w)
 
 
 class gyro:
-    def __init__(self, sensor_rate, M, covBias, covW):
-        self.sensor_rate = sensor_rate
-        self.set_M(M)
-        self.set_covBias(covBias)
-        self.set_covW(covW)
-        self.b = 0
+    """y = M omega_true + beta(t) + w, with random-walk bias beta_{k+1} = beta_k + v.
+    W_PSD has units rad^2/Hz (per-sample variance W_PSD / dt).
+    V_bias_PSD has units rad^2/s (per-step variance V_bias_PSD * dt)."""
+    def __init__(self, dt, W_PSD, V_bias_PSD, M=None, b0=None, rng=None):
+        self.dt = dt
+        self.M = np.eye(3) if M is None else np.asarray(M, dtype=float)
+        self.W_disc = np.asarray(W_PSD, dtype=float) / dt
+        self.V_disc = np.asarray(V_bias_PSD, dtype=float) * dt
+        self.b = np.zeros(3) if b0 is None else np.asarray(b0, dtype=float).reshape(3).copy()
+        self.rng = rng if rng is not None else np.random.default_rng()
 
-    def set_M(self, M):
-        M = np.asarray(M)
-        if M.shape != (3, 3):
-            raise ValueError("M must be shape (3, 3)")
-        self.M = M
-
-    def set_covBias(self, covBias):
-        covBias = np.asarray(covBias)
-        if covBias.shape != (3, 3):
-            raise ValueError("covBias must be shape (3, 3)")
-        self.covBias = covBias
-
-    def set_covW(self, covW):
-        covW = np.asarray(covW)
-        if covW.shape != (3, 3):
-            raise ValueError("covW must be shape (3, 3)")
-        self.covW = covW
-
-    def getMsmt(self, w_true):
-        w_true = w_true.reshape(3,)
-        w = np.random.multivariate_normal(np.zeros(3), self.covW * np.sqrt(self.sensor_rate))  # noise scaled by sensor rate
-        self.b += np.random.multivariate_normal(np.zeros(3), self.covBias / np.sqrt(self.sensor_rate))  # bias drift scaled by sensor rate
-        y = self.M @ w_true + self.b + w
-        return y
+    def getMsmt(self, omega_true):
+        w = self.rng.multivariate_normal(np.zeros(3), self.W_disc)
+        self.b = self.b + self.rng.multivariate_normal(np.zeros(3), self.V_disc)
+        return self.M @ omega_true + self.b + w

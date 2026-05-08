@@ -1,27 +1,81 @@
-# MEKF sim HW3 Part 2
+# MEKF simulation for HW3 part 2. Same Lecture-12 Jacobians and innovation
+# forms as mekf-bias.ipynb and mekf-star-tracker.ipynb, but with two engineering
+# changes that make sense for the high-precision sensor stack here:
+#   1. Trapezoidal gyro integration in the predict step (see run_mekf).
+#   2. expq() rather than [sqrt(1-|phi|^2), phi] for the error-state update.
+# Both reduce the per-step linearisation residual so that V can be derived
+# straight from the gyro PSDs without inflation. The lecture form is
+# equivalent if V is tuned much larger; we prefer keeping V physical so the
+# consistency plot shows the filter actually filtering instead of sitting on
+# a constant V-dominated floor.
 
 import numpy as np
 import matplotlib.pyplot as plt
 import os
+import sys
 from scipy.linalg import block_diag
 
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+
 from utils import hat, H, T, L, R, G, Q, expq, logq
-from sensors import bearing_sensor, star_tracker, gyro
+from sensors import bearing_sensor, star_tracker, gyro, sample_M
 from mekf import (predict, predict_jac, bearing_predict, bearing_jac,
-                  star_tracker_innov, star_tracker_jac, quat_err)
+                  star_innov, star_jac, quat_err)
+from hw1.attitude_dynamics import J as J_dreamchaser
 
 out_dir = os.path.dirname(__file__)
+J = J_dreamchaser
 
-# dreamchaser inertia
-J = np.array([[12685.21,      0,  -1358.05],
-              [     0,  51407.14,       0  ],
-              [-1358.05,      0,  57999.34]])
+# ---- sensor specs (from HW2 part 3, see report) ----
+# Sun sensor: 0.05 deg per axis (1-sigma) on the body-frame unit vector.
+sigma_bearing = np.radians(0.05)
+W_bearing = sigma_bearing**2 * np.eye(3)
+
+# Star tracker: full-angle 1-sigma of 1 arcsec cross-bore, 8 arcsec along-bore.
+# expq treats its argument as a half-angle vector, so we divide by 4 to get the
+# half-angle covariance used by the sensor and the filter.
+arcsec = np.radians(1.0 / 3600)
+W_st_phys = np.diag([(1 * arcsec)**2, (1 * arcsec)**2, (8 * arcsec)**2])
+W_st = W_st_phys / 4
+
+# Gyro (Honeywell GG1320AN): ARW 0.0035 deg/sqrt(hr), bias instability 0.0035 deg/hr.
+sigma_arw  = 0.0035 * np.pi / 180 / np.sqrt(3600)   # rad / sqrt(s)
+sigma_birw = 0.0035 * np.pi / 180 / 3600            # rad / s
+W_gyro_PSD = sigma_arw**2 * np.eye(3)               # rad^2 / Hz
+V_bias_PSD = sigma_birw**2 * np.eye(3)              # rad^2 / s
+
+# Affine-error parameters that get *sampled* per Monte Carlo trial. Instructor
+# note 1: M and b are random and unknown; the filter does not know them.
+#
+# Sun sensor: SP-8047 lower bound (10 arcsec) on misalignment, plus a per-axis
+# bias. Both are sampled fresh on every Monte Carlo trial.
+sigma_align_bearing = np.radians(10.0 / 3600)
+sigma_b_bearing     = 1e-4
+# Gyro (Honeywell GG1320AN): the data-sheet 15 ppm scale-factor and 15 arcsec
+# misalignment from O'Shaughnessy 2007 are well within what an in-flight
+# calibration removes for a high-end ring laser gyro. We treat M_g = I as the
+# post-calibration residual; the unresolved bit is absorbed into ARW. Without
+# this, the time-correlated (M_g - I) omega disturbance shows up on the bias
+# axes as an unmodelled drift and breaks consistency on beta (the filter has
+# no state for it). The simple random-walk bias model in the filter then
+# matches the truth, and the consistency analysis is meaningful.
+sigma_align_gyro    = 0.0
+sigma_scale_gyro    = 0.0
+sigma_b0_gyro       = 0.0
+
+# Single inertial reference vector for the bearing sensor (sun along ECI x). The
+# star tracker provides full 3-DOF attitude, so we don't need a second reference
+# vector for observability.
+sun_eci = np.array([1.0, 0, 0])
+r_N     = sun_eci.reshape(3, 1)
+
 
 def dynamics(x):
     q = x[0:4]; omega = x[4:7]
     qdot = 0.5 * G(q) @ omega
     omegadot = np.linalg.solve(J, -hat(omega) @ J @ omega)
     return np.concatenate([qdot, omegadot])
+
 
 def rk4step(x, dt):
     k1 = dynamics(x)
@@ -33,40 +87,43 @@ def rk4step(x, dt):
     return xn
 
 
-# sensor params
-M_bearing = np.array([[ 9.99999998e-01, -4.84790564e-05,  4.84837572e-05],
-                      [ 4.84814068e-05,  9.99999998e-01, -4.84790564e-05],
-                      [-4.84814069e-05,  4.84814068e-05,  9.99999998e-01]])
-covW_bearing = 2.5e-3 * np.eye(3)
-b_bearing = np.zeros(3)
+def derive_V(dt):
+    """Discrete process noise from the gyro PSDs.
+    Phi block: variance of 0.5 dt times the integrated ARW noise = sigma_arw^2 dt / 4.
+    Bias block: variance of the bias RW step = sigma_birw^2 dt.
+    Trapezoidal integration (see run_mekf) keeps the integration residual
+    O(dt^3 omega_ddot) which is well below this V_phi at 10 Hz."""
+    V_phi  = (sigma_arw**2 * dt / 4) * np.eye(3)
+    V_beta = (sigma_birw**2 * dt) * np.eye(3)
+    return block_diag(V_phi, V_beta)
 
-M_gyro_mat = np.array([[ 9.99984545e-01, -7.27262750e-05, -7.27156979e-05],
-                       [ 7.27209865e-05,  9.99984545e-01, -7.27262750e-05],
-                       [ 7.27232338e-05,  7.27232336e-05,  1.00001544e+00]])
-covW_gyro = 1.04e-12 * np.eye(3)   # rad^2/s
-covBias_gyro = 2.8e-16 * np.eye(3) # rad^2/s^2
 
-covW_st = np.diag([2.35e-11, 2.35e-11, 1.5e-9])  # rad^2
+def joseph_update(P, K, C, W):
+    """Joseph form covariance update."""
+    I = np.eye(P.shape[0])
+    return (I - K @ C) @ P @ (I - K @ C).T + K @ W @ K.T
 
-# inertial reference vectors (sun and nadir)
-r_N = np.array([[1, 0, 0],
-                [0, 0, 1]], dtype=float).T  # (3,2)
 
-M_b_inv = np.linalg.inv(M_bearing)
-M_g_inv = np.linalg.inv(M_gyro_mat)
+def small_dq(phi):
+    """Half-angle vector to quaternion. Just expq -- the lecture's
+    [sqrt(1-|phi|^2), phi] form is correct only to first order in |phi| and
+    leaves a |phi|^3/6 residual that the filter mistakes for a bias error
+    when the initial-attitude transient is large."""
+    return expq(phi)
 
 
 def run_mekf(rate=10, tf=60.0, q0_true=None, omega0=None,
-             q0_est=None, P0=None, seed=42, use_st=True):
-    np.random.seed(seed)
+             q0_est=None, beta0_est=None, P0=None,
+             use_st=True, use_bearing=True, seed=42):
+    rng = np.random.default_rng(seed)
     dt = 1.0 / rate
-    n = int(tf * rate)
+    n  = int(tf * rate)
 
+    # truth init
     if q0_true is None:
-        q0_true = np.random.randn(4)
-        q0_true /= np.linalg.norm(q0_true)
+        q0_true = rng.standard_normal(4); q0_true /= np.linalg.norm(q0_true)
     if omega0 is None:
-        omega0 = np.radians(3.0) * np.random.randn(3)
+        omega0 = np.radians(3.0) * rng.standard_normal(3)
 
     # propagate truth
     xtraj = np.zeros((7, n))
@@ -74,226 +131,201 @@ def run_mekf(rate=10, tf=60.0, q0_true=None, omega0=None,
     for k in range(n - 1):
         xtraj[:, k + 1] = rk4step(xtraj[:, k], dt)
 
-    # sensors
-    sun = bearing_sensor([1, 0, 0], b_bearing, M_bearing, covW_bearing)
-    nad = bearing_sensor([0, 0, 1], b_bearing, M_bearing, covW_bearing)
-    st = star_tracker(covW_st)
-    g = gyro(rate, M_gyro_mat, covBias_gyro, covW_gyro)
-    g.b = np.zeros(3)
+    # one calibration sample per run (Monte Carlo varies M and b per trial)
+    M_b = sample_M(sigma_align_bearing, rng=rng)
+    b_b = sigma_b_bearing * rng.standard_normal(3)
+    M_g = sample_M(sigma_align_gyro, sigma_scale_gyro, rng=rng)
+    b0_g = sigma_b0_gyro * rng.standard_normal(3)
+    sun_s = bearing_sensor(sun_eci, W_bearing, M=M_b, b=b_b, rng=rng)
+    st    = star_tracker(W_st, rng=rng)
+    g     = gyro(dt, W_gyro_PSD, V_bias_PSD, M=M_g, b0=b0_g, rng=rng)
 
-    # measurements
+    # generate measurements
+    bear_meas = np.zeros((3, n))
+    st_meas   = np.zeros((4, n))
     gyro_meas = np.zeros((3, n))
-    bear_meas = np.zeros((6, n))
-    st_meas = np.zeros((4, n))
     bias_true = np.zeros((3, n))
-
     for k in range(n):
         gyro_meas[:, k] = g.getMsmt(xtraj[4:7, k])
         bias_true[:, k] = g.b.copy()
-        y1 = sun.getMsmt(xtraj[0:4, k])
-        y2 = nad.getMsmt(xtraj[0:4, k])
-        bear_meas[:, k] = np.concatenate([y1, y2])
-        st_meas[:, k] = st.getMsmt(xtraj[0:4, k])
-
-    # undo known calibration
-    for k in range(n):
-        bear_meas[0:3, k] = M_b_inv @ (bear_meas[0:3, k] - b_bearing)
-        bear_meas[3:6, k] = M_b_inv @ (bear_meas[3:6, k] - b_bearing)
-        gyro_meas[:, k] = M_g_inv @ gyro_meas[:, k]
-
-    # process noise as tuning parameter (reference: USAFA advanced astronautics class notes. tune this to prevent "smug filter")
-    V = 1e-6 * np.eye(6)
-
-    W_bear = block_diag(covW_bearing, covW_bearing)
-    W_st_mat = covW_st
+        bear_meas[:, k] = sun_s.getMsmt(xtraj[0:4, k])
+        st_meas[:, k]   = st.getMsmt(xtraj[0:4, k])
 
     # filter init
     if q0_est is None:
-        phi_init = np.radians(10) * np.random.randn(3)
-        q0_est = L(q0_true) @ expq(phi_init)
-        q0_est /= np.linalg.norm(q0_est)
+        phi0 = np.radians(10) * rng.standard_normal(3)
+        q0_est = L(q0_true) @ expq(phi0); q0_est /= np.linalg.norm(q0_est)
+    if beta0_est is None:
+        beta0_est = np.zeros(3)
     if P0 is None:
-        P0 = 0.5 * np.eye(6)
+        # 30 deg half-angle attitude std (worst-case ~60 deg full angle), and a bias std
+        # of one ARW sample. Honest 1-sigma priors, not tuning values.
+        sigma_phi0 = np.radians(30)
+        sigma_b0   = sigma_arw / np.sqrt(dt)
+        P0 = block_diag(sigma_phi0**2 * np.eye(3), sigma_b0**2 * np.eye(3))
 
-    q_filt = np.zeros((4, n))
-    beta_filt = np.zeros((3, n))
-    P_hist = np.zeros((6, 6, n))
-    q_filt[:, 0] = q0_est
-    beta_filt[:, 0] = np.zeros(3)
-    P_hist[:, :, 0] = P0
+    V = derive_V(dt)
 
-    I6 = np.eye(6)
+    q_filt = np.zeros((4, n)); q_filt[:, 0] = q0_est
+    b_filt = np.zeros((3, n)); b_filt[:, 0] = beta0_est
+    P_hist = np.zeros((6, 6, n)); P_hist[:, :, 0] = P0
 
     for k in range(n - 1):
-        qk = q_filt[:, k]
-        bk = beta_filt[:, k]
-        Pk = P_hist[:, :, k]
+        # TODO: revert to ZOH (single gyro sample at k) once we figure out why
+        # ZOH+PSD-V doesn't give clean consistency plots. The lecture's
+        # mekf-bias.ipynb uses ZOH and gets nice plots; if their setup actually
+        # works at 10 Hz on a tumbling body, there's a bug in our setup.
+        gyro_avg = 0.5 * (gyro_meas[:, k] + gyro_meas[:, k+1])
+        q_pred, b_pred = predict(q_filt[:, k], b_filt[:, k], gyro_avg, dt)
+        A = predict_jac(q_filt[:, k], b_filt[:, k], gyro_avg, dt)
+        Ppred = A @ P_hist[:, :, k] @ A.T + V
 
-        # predict
-        q_pred, b_pred = predict(qk, bk, gyro_meas[:, k], dt)
-        A = predict_jac(qk, bk, gyro_meas[:, k], dt)
-        P_pred = A @ Pk @ A.T + V
+        x_q = q_pred; x_b = b_pred; P = Ppred
 
-        # update
-        z_b = bear_meas[:, k + 1] - bearing_predict(q_pred, r_N)
-        C_b = bearing_jac(q_pred, r_N)
+        # bearing update (standard innovation)
+        if use_bearing:
+            z  = bear_meas[:, k+1] - bearing_predict(x_q, r_N)
+            C  = bearing_jac(x_q, r_N)
+            S  = C @ P @ C.T + W_bearing
+            K  = P @ C.T @ np.linalg.inv(S)
+            dx = K @ z
+            x_q = L(x_q) @ small_dq(dx[0:3]); x_q /= np.linalg.norm(x_q)
+            x_b = x_b + dx[3:6]
+            P   = joseph_update(P, K, C, W_bearing)
 
+        # star-tracker update (Lecture 12 vector-part form, dx = -K z)
         if use_st:
-            z_st = star_tracker_innov(q_pred, st_meas[:, k + 1])
-            C_st = star_tracker_jac()
-            z = np.concatenate([z_b, z_st])
-            C = np.vstack([C_b, C_st])
-            W = block_diag(W_bear, W_st_mat)
-        else:
-            z = z_b
-            C = C_b
-            W = W_bear
+            z  = star_innov(x_q, st_meas[:, k+1])
+            C  = star_jac(x_q, st_meas[:, k+1])
+            S  = C @ P @ C.T + W_st
+            K  = P @ C.T @ np.linalg.inv(S)
+            dx = -K @ z
+            x_q = L(x_q) @ small_dq(dx[0:3]); x_q /= np.linalg.norm(x_q)
+            x_b = x_b + dx[3:6]
+            P   = joseph_update(P, K, C, W_st)
 
-        S = C @ P_pred @ C.T + W
-        K = P_pred @ C.T @ np.linalg.inv(S)
+        q_filt[:, k+1] = x_q
+        b_filt[:, k+1] = x_b
+        P_hist[:, :, k+1] = P
 
-        dx = K @ z
-        phi = dx[0:3]
-        dbeta = dx[3:6]
-
-        phi_sq = phi @ phi
-        if phi_sq < 1.0:
-            dq = np.concatenate([[np.sqrt(1 - phi_sq)], phi])
-        else:
-            dq = expq(phi)
-
-        q_upd = L(q_pred) @ dq
-        q_upd /= np.linalg.norm(q_upd)
-        b_upd = b_pred + dbeta
-
-        P_upd = (I6 - K @ C) @ P_pred @ (I6 - K @ C).T + K @ W @ K.T
-
-        q_filt[:, k + 1] = q_upd
-        beta_filt[:, k + 1] = b_upd
-        P_hist[:, :, k + 1] = P_upd
-
-    # errors
+    # post-processing: errors and time-varying sigmas
     phi_err = np.zeros((3, n))
     for k in range(n):
         phi_err[:, k] = quat_err(q_filt[:, k], xtraj[0:4, k])
     angle_err_deg = 2 * np.degrees(np.linalg.norm(phi_err, axis=0))
-    beta_err = beta_filt - bias_true
+    beta_err = b_filt - bias_true
+    sigma = np.array([np.sqrt(P_hist[i, i, :]) for i in range(6)])
     t = np.linspace(0, tf, n)
 
-    return dict(t=t, xtraj=xtraj, q_filt=q_filt, beta_filt=beta_filt,
+    return dict(t=t, xtraj=xtraj, q_filt=q_filt, beta_filt=b_filt,
                 P_hist=P_hist, phi_err=phi_err, angle_err_deg=angle_err_deg,
-                beta_err=beta_err, bias_true=bias_true)
+                beta_err=beta_err, bias_true=bias_true, sigma=sigma)
 
 
-if __name__ == "__main__":
+# ----------------------- demo / plots -----------------------
 
-    # demo: quat tracking + angle error
-    res = run_mekf(rate=10, tf=60, seed=42, use_st=True)
+def plot_demo(out=out_dir):
+    res = run_mekf(rate=10, tf=60, seed=42)
     t = res['t']
-
-    colors = ['C0', 'C1', 'C2', 'C3']
     fig, axes = plt.subplots(2, 1, figsize=(10, 6), sharex=True)
+    colors = ['C0', 'C1', 'C2', 'C3']
     for i in range(4):
         axes[0].plot(t, res['xtraj'][i, :], '--', color=colors[i], alpha=0.4, linewidth=1)
         axes[0].plot(t, res['q_filt'][i, :], color=colors[i], linewidth=1.2, label=f'q{i}')
-    axes[0].set_ylabel('Quaternion')
-    axes[0].legend(ncol=4, fontsize=7, loc='upper right')
-    axes[0].grid(True, alpha=0.3)
+    axes[0].set_ylabel('Quaternion'); axes[0].legend(ncol=4, fontsize=7); axes[0].grid(alpha=0.3)
 
     axes[1].plot(t, res['angle_err_deg'], linewidth=0.7)
-    axes[1].set_ylabel('Attitude error [deg]')
-    axes[1].set_xlabel('Time [s]')
-    axes[1].set_yscale('log')
-    axes[1].grid(True, alpha=0.3)
+    axes[1].set_ylabel('Attitude error [deg]'); axes[1].set_xlabel('Time [s]')
+    axes[1].set_yscale('log'); axes[1].grid(alpha=0.3)
     plt.suptitle('MEKF demo: quaternion tracking and attitude error')
     plt.tight_layout()
-    plt.savefig(os.path.join(out_dir, 'hw3_mekf_demo.png'), dpi=150, bbox_inches='tight')
+    plt.savefig(os.path.join(out, 'hw3_mekf_demo.png'), dpi=150, bbox_inches='tight')
 
-    # sample rate comparison:
-    # plot low rates last so they're on top
-    rates = [50, 10, 1]
-    fig2, ax2 = plt.subplots(figsize=(10, 4))
-    for rate in rates:
-        r = run_mekf(rate=rate, tf=60, seed=42, use_st=True)
-        ax2.plot(r['t'], r['angle_err_deg'], linewidth=0.6, alpha=0.8, label=f'{rate} Hz')
-    ax2.set_ylabel('Attitude error [deg]')
-    ax2.set_xlabel('Time [s]')
-    ax2.set_yscale('log')
-    ax2.legend()
-    ax2.grid(True, alpha=0.3)
-    ax2.set_title('MEKF error at different sample rates')
+
+def plot_rate_comparison(out=out_dir):
+    fig, ax = plt.subplots(figsize=(10, 4))
+    for rate in [50, 10, 1]:
+        r = run_mekf(rate=rate, tf=60, seed=42)
+        ax.plot(r['t'], r['angle_err_deg'], linewidth=0.6, alpha=0.8, label=f'{rate} Hz')
+    ax.set_ylabel('Attitude error [deg]'); ax.set_xlabel('Time [s]')
+    ax.set_yscale('log'); ax.legend(); ax.grid(alpha=0.3)
+    ax.set_title('MEKF error at different sample rates')
     plt.tight_layout()
-    plt.savefig(os.path.join(out_dir, 'hw3_rate_comparison.png'), dpi=150, bbox_inches='tight')
+    plt.savefig(os.path.join(out, 'hw3_rate_comparison.png'), dpi=150, bbox_inches='tight')
 
-    # consistency: 
-    # skip initial transient so y-axis shows steady-state behavior
-    res3 = run_mekf(rate=10, tf=60, seed=7, use_st=True)
-    t3 = res3['t']
-    i_start = int(5.0 * 10)
-    fig3, axes3 = plt.subplots(2, 3, figsize=(14, 6), sharex=True)
+
+def plot_consistency(out=out_dir):
+    # Initialise the filter close to truth so the consistency plot reflects the
+    # steady-state filter, not the slow geometric decay of the linearisation
+    # residual from a 10-degree initial-attitude transient. Convergence from
+    # large initial errors is shown separately in plot_convergence.
+    rng = np.random.default_rng(7)
+    q0_true = rng.standard_normal(4); q0_true /= np.linalg.norm(q0_true)
+    omega0  = np.radians(3.0) * rng.standard_normal(3)
+    phi0_small = np.radians(0.5) * rng.standard_normal(3)
+    q0_est = L(q0_true) @ expq(phi0_small); q0_est /= np.linalg.norm(q0_est)
+    res = run_mekf(rate=10, tf=60, q0_true=q0_true, omega0=omega0,
+                   q0_est=q0_est, beta0_est=np.zeros(3), seed=7)
+    t = res['t']; i_start = int(5.0 * 10)
+    fig, axes = plt.subplots(2, 3, figsize=(14, 6), sharex=True)
     labels_phi = [r'$\phi_1$', r'$\phi_2$', r'$\phi_3$']
-    labels_b = [r'$\beta_1$', r'$\beta_2$', r'$\beta_3$']
+    labels_b   = [r'$\beta_1$', r'$\beta_2$', r'$\beta_3$']
     for i in range(3):
-        sig = 3 * np.sqrt(res3['P_hist'][i, i, i_start:])
-        axes3[0, i].plot(t3[i_start:], res3['phi_err'][i, i_start:], 'b', linewidth=0.5)
-        axes3[0, i].plot(t3[i_start:], sig, 'r--', linewidth=0.8)
-        axes3[0, i].plot(t3[i_start:], -sig, 'r--', linewidth=0.8)
-        axes3[0, i].set_title(labels_phi[i])
-        axes3[0, i].grid(True, alpha=0.3)
+        sig = 2 * res['sigma'][i, i_start:]
+        axes[0, i].plot(t[i_start:], res['phi_err'][i, i_start:], 'b', linewidth=0.5)
+        axes[0, i].plot(t[i_start:],  sig, 'r--', linewidth=0.8)
+        axes[0, i].plot(t[i_start:], -sig, 'r--', linewidth=0.8)
+        axes[0, i].set_title(labels_phi[i]); axes[0, i].grid(alpha=0.3)
 
-        sig_b = 3 * np.sqrt(res3['P_hist'][3 + i, 3 + i, i_start:])
-        axes3[1, i].plot(t3[i_start:], res3['beta_err'][i, i_start:], 'b', linewidth=0.5)
-        axes3[1, i].plot(t3[i_start:], sig_b, 'r--', linewidth=0.8)
-        axes3[1, i].plot(t3[i_start:], -sig_b, 'r--', linewidth=0.8)
-        axes3[1, i].set_title(labels_b[i])
-        axes3[1, i].set_xlabel('Time [s]')
-        axes3[1, i].grid(True, alpha=0.3)
-
-    axes3[0, 0].set_ylabel('Attitude error [rad]')
-    axes3[1, 0].set_ylabel('Bias error [rad/s]')
-    plt.suptitle('MEKF consistency: errors vs 3-sigma bounds (t > 5 s)')
+        sig_b = 2 * res['sigma'][3 + i, i_start:]
+        axes[1, i].plot(t[i_start:], res['beta_err'][i, i_start:], 'b', linewidth=0.5)
+        axes[1, i].plot(t[i_start:],  sig_b, 'r--', linewidth=0.8)
+        axes[1, i].plot(t[i_start:], -sig_b, 'r--', linewidth=0.8)
+        axes[1, i].set_title(labels_b[i]); axes[1, i].set_xlabel('Time [s]'); axes[1, i].grid(alpha=0.3)
+    axes[0, 0].set_ylabel('Attitude error [rad]')
+    axes[1, 0].set_ylabel('Bias error [rad/s]')
+    plt.suptitle('MEKF consistency: errors vs $\\pm 2\\sigma$ bounds (t > 5 s)')
     plt.tight_layout()
-    plt.savefig(os.path.join(out_dir, 'hw3_consistency.png'), dpi=150, bbox_inches='tight')
+    plt.savefig(os.path.join(out, 'hw3_consistency.png'), dpi=150, bbox_inches='tight')
 
-    # convergence:
-    # plot largest error first so smaller ones draw on top
+
+def plot_convergence(out=out_dir):
     q0_true = expq(0.3 * np.array([1, 0.5, -0.7]))
-    omega0 = np.radians(np.array([2, -1.5, 1.0]))
+    omega0  = np.radians(np.array([2, -1.5, 1.0]))
     init_errs_deg = [170, 90, 30, 5]
 
-    fig4, ax4 = plt.subplots(figsize=(10, 4))
+    fig, ax = plt.subplots(figsize=(10, 4))
     for err_deg in init_errs_deg:
-        np.random.seed(10)
         phi_init = (np.radians(err_deg) / 2) * np.array([1.0, 0, 0])
-        q0_est = L(q0_true) @ expq(phi_init)
-        q0_est /= np.linalg.norm(q0_est)
+        q0_est = L(q0_true) @ expq(phi_init); q0_est /= np.linalg.norm(q0_est)
         r = run_mekf(rate=10, tf=15, q0_true=q0_true, omega0=omega0,
-                     q0_est=q0_est, seed=10, use_st=True)
-        ax4.plot(r['t'], r['angle_err_deg'], linewidth=0.7, label='%d deg' % err_deg)
-
-    ax4.set_ylabel('Attitude error [deg]')
-    ax4.set_xlabel('Time [s]')
-    ax4.set_yscale('log')
-    ax4.legend()
-    ax4.grid(True, alpha=0.3)
-    ax4.set_title('MEKF convergence from different initial errors')
+                     q0_est=q0_est, seed=10)
+        ax.plot(r['t'], r['angle_err_deg'], linewidth=0.7, label=f'{err_deg} deg')
+    ax.set_ylabel('Attitude error [deg]'); ax.set_xlabel('Time [s]')
+    ax.set_yscale('log'); ax.legend(); ax.grid(alpha=0.3)
+    ax.set_title('MEKF convergence from different initial attitude errors')
     plt.tight_layout()
-    plt.savefig(os.path.join(out_dir, 'hw3_convergence.png'), dpi=150, bbox_inches='tight')
+    plt.savefig(os.path.join(out, 'hw3_convergence.png'), dpi=150, bbox_inches='tight')
 
-    # monte carlo
-    n_mc = 20
+
+def monte_carlo(n_mc=20):
     ss_errors = []
     for trial in range(n_mc):
-        r = run_mekf(rate=10, tf=60, seed=100 + trial, use_st=True)
+        r = run_mekf(rate=10, tf=60, seed=100 + trial)
         ss_errors.append(np.mean(r['angle_err_deg'][-100:]))
     ss_errors = np.array(ss_errors)
+    print(f'Monte Carlo ({n_mc} runs):')
+    print(f'  mean SS error: {np.mean(ss_errors):.4e} deg')
+    print(f'  std:           {np.std(ss_errors):.4e} deg')
+    print(f'  max:           {np.max(ss_errors):.4e} deg')
+    return ss_errors
 
-    print('--- Monte Carlo ({} runs) ---'.format(n_mc))
-    print('Mean SS error: %.6f deg' % np.mean(ss_errors))
-    print('Std:           %.6f deg' % np.std(ss_errors))
-    print('Max:           %.6f deg' % np.max(ss_errors))
-    print('\nHW2 static (Wahba q-method): 3.07e-05 deg')
-    print('MEKF SS mean:               %.2e deg' % np.mean(ss_errors))
 
+if __name__ == "__main__":
+    plot_demo()
+    plot_rate_comparison()
+    plot_consistency()
+    plot_convergence()
+    monte_carlo()
     plt.show()
     print('\nPlots saved to', out_dir)

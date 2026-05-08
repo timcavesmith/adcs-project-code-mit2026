@@ -21,7 +21,7 @@ def shortest_axis_angle(q_0, q_d):
 
 
 def versine_profile(t, theta_final, T_man):
-    """Lecture 16 page 5 versine and its first two derivatives."""
+    """versine and its first two derivatives."""
     alpha = np.pi / T_man
     return (0.5 * theta_final * (1 - np.cos(alpha * t)),
             0.5 * theta_final * alpha * np.sin(alpha * t),
@@ -65,7 +65,7 @@ def reference_trajectory(q_0, q_d, T_man, dt, J, rho0=None):
 def slew_command(traj, k, q_hat, omega_hat, K_p, K_d, saturate=True):
     """Closed-loop wheel command at sample k (Lecture 17 page 5):
         u_W = u_W_ff - B_W^+ (K_p delta_phi + K_d delta_omega).
-    Gains K_p, K_d come from the regulator (the linearisation about the
+    Gains K_p, K_d come from the regulator (the linearization about the
     reference is the same double integrator)."""
     q_ref = traj['q_ref'][:, k]
     omega_ref = traj['omega_ref'][:, k]

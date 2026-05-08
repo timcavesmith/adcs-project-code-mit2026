@@ -1,5 +1,5 @@
 # Quaternion PD regulator with inverse-dynamics feedforward, gains by pole
-# placement on the Lecture 16 linearisation.
+# placement on the Lecture 16 linearization.
 
 import numpy as np
 import os

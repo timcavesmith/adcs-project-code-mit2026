@@ -19,9 +19,9 @@ from hw4.actuators import WHEEL_TORQUE_MAX, B_W_pinv
 
 OUT_DIR = os.path.dirname(__file__)
 
-# Same gains as the regulator: linearisation about the nominal trajectory is
+# Same gains as the regulator: linearization about the nominal trajectory is
 # the same double integrator, with negligible Coriolis-rate corrections at
-# our peak body rate (Lecture 17 page 6).
+# our peak body rate 
 OMEGA_N = 5e-3
 ZETA = 1.0
 K_P, K_D = pd_gains(J_dc, OMEGA_N, ZETA)

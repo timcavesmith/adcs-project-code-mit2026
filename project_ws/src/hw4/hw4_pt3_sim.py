@@ -1,4 +1,4 @@
-# HW4 part 3: attitude regulator. Two test sets per the homework prompt:
+# HW4 part 3: attitude regulator. 
 #   1. Random initial conditions out to +/- 90 deg.
 #   2. Multi-orbit run with disturbances + sensor noise + MEKF in the loop,
 #      reporting RMS pointing error.

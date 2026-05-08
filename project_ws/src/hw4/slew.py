@@ -1,5 +1,5 @@
-# Eigen-axis slew planner + inverse-dynamics feed-forward (Lecture 16
-# pages 4-6) and the closed-loop tracking command (Lecture 17 page 5).
+# Versine eigen-axis slew planner with inverse-dynamics feedforward, plus the
+# closed-loop tracking command.
 
 import numpy as np
 import os

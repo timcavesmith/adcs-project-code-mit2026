@@ -1,11 +1,5 @@
-# Quaternion attitude regulator (HW4 part 3, following Lecture 16).
-#
-# Linearising the gyrostat about (q_d, omega = 0, rho = 0) gives the per-axis
-# double integrator J phi_ddot + K_d phi_dot + K_p phi = tau_ext (Lecture 16
-# page 3). We pick K_p, K_d by pole placement on this plant. The inverse-
-# dynamics term cancels the gyroscopic cross-coupling exactly (Lecture 16
-# page 5, with omega_dot_des = 0):
-#   tau_cmd = -K_p phi - K_d omega_hat + omega_hat x (J omega_hat + rho_hat).
+# Quaternion PD regulator with inverse-dynamics feedforward, gains by pole
+# placement on the Lecture 16 linearisation.
 
 import numpy as np
 import os

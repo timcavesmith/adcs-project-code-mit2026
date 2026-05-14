@@ -77,7 +77,7 @@ def plot_random_ic(results, out=OUT_DIR):
                      label=f"$|\\phi_0| = {r['angle0_deg']:.0f}^\\circ$")
         axes[1].plot(r['t'][:-1], np.linalg.norm(r['tau_cmd'], axis=0), linewidth=0.9)
         axes[2].plot(r['t'][:-1], np.max(np.abs(r['u_W']), axis=0), linewidth=0.9)
-    axes[0].set_ylabel('Attitude error [deg]'); axes[0].set_yscale('log')
+    axes[0].set_ylabel('Attitude error [deg]')
     axes[0].grid(alpha=0.3); axes[0].legend(fontsize=8)
     axes[1].axhline(cap, color='k', linestyle='--', linewidth=0.7,
                     label=f'transverse cap {cap:.2f} Nm')
@@ -123,7 +123,7 @@ def plot_orbit_long(res, err, T_orbit, out=OUT_DIR):
     t = res['t']
     fig, axes = plt.subplots(3, 1, figsize=(9, 8.5), sharex=True)
     axes[0].plot(t, err, linewidth=0.7)
-    axes[0].set_ylabel('Attitude error [deg]'); axes[0].set_yscale('log')
+    axes[0].set_ylabel('Attitude error [deg]')
     axes[0].grid(alpha=0.3)
 
     rho = res['x'][13:16, :]

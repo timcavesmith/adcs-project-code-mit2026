@@ -175,7 +175,7 @@ def plot_comparison(comp, out=OUT_DIR):
     axes[0].plot(t, comp['err_slew'], 'C0', linewidth=1.0, label='eigen-axis slew')
     axes[0].axvline(comp['T_man'], color='gray', linestyle=':', linewidth=0.7)
     axes[0].set_ylabel('|attitude error| [deg]')
-    axes[0].set_yscale('log'); axes[0].grid(alpha=0.3); axes[0].legend(fontsize=9)
+    axes[0].grid(alpha=0.3); axes[0].legend(fontsize=9)
 
     axes[1].plot(t[:-1], np.max(np.abs(comp['res_reg']['u_W']), axis=0),
                  'C3', linewidth=0.9, label='regulator')
